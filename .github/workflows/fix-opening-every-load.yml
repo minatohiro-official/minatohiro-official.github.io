@@ -1,0 +1,41 @@
+name: Fix opening every load
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-opening-every-load.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove once-per-day guard
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+          original = s
+          replacements = [
+              ("const today=new Date().toISOString().slice(0,10);if(localStorage.getItem('minatoOpeningDate')===today){intro.remove();document.body.classList.remove('intro-lock');return;}localStorage.setItem('minatoOpeningDate',today);", ""),
+              ("const today = new Date().toISOString().slice(0,10);\n    if (localStorage.getItem('minatoOpeningDate') === today) {\n      intro.remove();\n      document.body.classList.remove('intro-lock');\n      return;\n    }\n    localStorage.setItem('minatoOpeningDate', today);", ""),
+              ("if(localStorage.getItem('minatoOpeningSeen')){intro.remove();document.body.classList.remove('intro-lock');return;}localStorage.setItem('minatoOpeningSeen','1');", ""),
+              ("if(sessionStorage.getItem('minatoOpeningSeen')){intro.remove();document.body.classList.remove('intro-lock');return;}sessionStorage.setItem('minatoOpeningSeen','1');", ""),
+          ]
+          for a,b in replacements:
+              s=s.replace(a,b)
+          # Generic cleanup for the exact marker used by the opening patch if formatting differs.
+          import re
+          s = re.sub(r"\s*const\s+today\s*=\s*new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\);\s*if\s*\(localStorage\.getItem\(['\"]minatoOpeningDate['\"]\)\s*===\s*today\)\s*\{.*?\}\s*localStorage\.setItem\(['\"]minatoOpeningDate['\"],\s*today\);", "", s, flags=re.S)
+          if s == original:
+              raise SystemExit('Opening guard pattern not found; no changes made')
+          p.write_text(s, encoding='utf-8')
+      - name: Commit patch and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-opening-every-load.yml
+          git add index.html
+          git commit -m "Show cinematic opening on every page load"
+          git push
