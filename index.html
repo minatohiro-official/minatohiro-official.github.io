@@ -99,20 +99,14 @@ html.minato-intro-lock,html.minato-intro-lock body{overflow:hidden!important}
 (()=>{
   const el=document.getElementById('minatoOpening');
   if(!el)return;
-  const key='minatoHiroOpeningDate';
-  const today=new Date().toLocaleDateString('sv-SE');
-  let seen=false;
-  try{seen=localStorage.getItem(key)===today}catch(e){}
   const reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let closed=false;
   const close=()=>{
     if(closed)return;closed=true;
     el.classList.add('is-leaving');
     document.documentElement.classList.remove('minato-intro-lock');
-    try{localStorage.setItem(key,today)}catch(e){}
     window.setTimeout(()=>el.remove(),800);
   };
-  if(seen){el.remove();return}
   document.documentElement.classList.add('minato-intro-lock');
   const skip=document.getElementById('minatoOpeningSkip');
   if(skip)skip.addEventListener('click',close,{once:true});
