@@ -1,0 +1,33 @@
+name: Change favicon to Minato kanji
+on:
+  push:
+    paths:
+      - '.github/workflows/change-favicon-minato.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace M favicon with 湊
+        shell: python
+        run: |
+          from pathlib import Path
+          import re, urllib.parse
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          svg='''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#07131f"/><text x="32" y="44" fill="#bfeaff" font-family="sans-serif" font-size="36" font-weight="700" text-anchor="middle">湊</text></svg>'''
+          href='data:image/svg+xml,'+urllib.parse.quote(svg, safe='')
+          new=f'<link rel="icon" href="{href}" type="image/svg+xml">'
+          s2,n=re.subn(r'<link rel="icon"[^>]*>',new,s,count=1)
+          if n!=1: raise SystemExit('favicon link not found')
+          p.write_text(s2,encoding='utf-8')
+      - name: Commit and clean up
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/change-favicon-minato.yml
+          git add index.html
+          git commit -m "Change site favicon from M to 湊"
+          git push
