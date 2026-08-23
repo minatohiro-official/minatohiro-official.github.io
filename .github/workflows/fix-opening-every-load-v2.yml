@@ -1,0 +1,34 @@
+name: Fix opening every load v2
+on:
+  push:
+    paths: ['.github/workflows/fix-opening-every-load-v2.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make opening play every load
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          old=s
+          # Actual installed code uses minatoHiroOpeningDate + toLocaleDateString('sv-SE').
+          s,n1=re.subn(r"\s*const key=['\"]minatoHiroOpeningDate['\"];\s*const today=new Date\(\)\.toLocaleDateString\(['\"]sv-SE['\"]\);\s*let seen=false;\s*try\{seen=localStorage\.getItem\(key\)===today\}catch\(e\)\{\}","",s,count=1)
+          s,n2=re.subn(r"\s*try\{localStorage\.setItem\(key,today\)\}catch\(e\)\{\}","",s,count=1)
+          s,n3=re.subn(r"\s*if\(seen\)\{el\.remove\(\);return\}","",s,count=1)
+          if not (n1 and n2 and n3):
+              raise SystemExit(f'Expected opening guard not fully found: {n1=}, {n2=}, {n3=}')
+          p.write_text(s,encoding='utf-8')
+      - name: Commit and clean up
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-opening-every-load-v2.yml
+          git add index.html
+          git commit -m "Play opening on every page load"
+          git push
