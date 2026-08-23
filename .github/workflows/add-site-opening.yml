@@ -1,0 +1,111 @@
+name: Add cinematic site opening
+
+on:
+  push:
+    paths:
+      - '.github/workflows/add-site-opening.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-opening:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add opening animation
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('index.html')
+          html = path.read_text(encoding='utf-8')
+          marker = 'MINATO_HIRO_CINEMATIC_OPENING'
+
+          if marker in html:
+              print('Opening already installed; no HTML change needed.')
+          else:
+              style = r'''
+          <!-- MINATO_HIRO_CINEMATIC_OPENING -->
+          <style id="minato-opening-style">
+          html.minato-intro-lock,html.minato-intro-lock body{overflow:hidden!important}
+          .minato-opening{position:fixed;z-index:99999;inset:0;display:grid;place-items:center;overflow:hidden;background:#03070c;color:#f4fbff;opacity:1;visibility:visible;transition:opacity .75s cubic-bezier(.4,0,.2,1),visibility .75s;isolation:isolate}
+          .minato-opening.is-leaving{opacity:0;visibility:hidden;pointer-events:none}
+          .minato-opening::before{content:"";position:absolute;z-index:-2;inset:-25%;background:radial-gradient(ellipse at 50% 54%,rgba(72,184,230,.14),transparent 31%),radial-gradient(ellipse at 50% 72%,rgba(18,103,156,.12),transparent 45%);filter:blur(18px);animation:minato-water-breathe 3s ease-in-out both}
+          .minato-opening::after{content:"";position:absolute;z-index:-1;left:50%;top:50%;width:min(86vw,1050px);height:1px;transform:translate(-50%,-50%) scaleX(0);transform-origin:center;background:linear-gradient(90deg,transparent,rgba(136,218,255,.15) 12%,rgba(225,248,255,.98) 50%,rgba(105,204,250,.2) 88%,transparent);box-shadow:0 0 8px rgba(173,229,255,.95),0 0 28px rgba(65,181,235,.62),0 0 68px rgba(28,128,193,.35);animation:minato-light-line 2.45s cubic-bezier(.2,.75,.2,1) both}
+          .minato-opening__inner{position:relative;text-align:center;transform:translateY(-1vh)}
+          .minato-opening__name{margin:0;font:400 clamp(44px,8vw,106px)/1 Georgia,"Times New Roman",serif;letter-spacing:.32em;text-indent:.32em;white-space:nowrap;opacity:0;filter:blur(9px);text-shadow:0 0 24px rgba(154,225,255,.12);animation:minato-name-in 1.4s .55s cubic-bezier(.16,1,.3,1) forwards}
+          .minato-opening__tagline{margin:22px 0 0;font:400 clamp(11px,1.35vw,16px)/1.7 "Yu Mincho","Hiragino Mincho ProN",serif;letter-spacing:.28em;text-indent:.28em;color:rgba(226,243,250,.76);opacity:0;transform:translateY(8px);animation:minato-tagline-in .85s 1.35s ease forwards}
+          .minato-opening__skip{position:absolute;right:max(22px,env(safe-area-inset-right));bottom:max(22px,env(safe-area-inset-bottom));appearance:none;border:0;border-bottom:1px solid rgba(194,228,242,.35);padding:7px 1px;background:transparent;color:rgba(220,239,247,.6);font:600 8px/1 Arial,sans-serif;letter-spacing:.28em;cursor:pointer;transition:color .2s,border-color .2s}
+          .minato-opening__skip:hover{color:#fff;border-color:rgba(215,244,255,.8)}
+          @keyframes minato-light-line{0%{transform:translate(-50%,-50%) scaleX(0);opacity:0}18%{opacity:1}63%{transform:translate(-50%,-50%) scaleX(1);opacity:1}100%{transform:translate(-50%,-50%) scaleX(1.08);opacity:0}}
+          @keyframes minato-name-in{0%{opacity:0;filter:blur(9px);letter-spacing:.48em;text-indent:.48em;transform:scale(.985)}100%{opacity:1;filter:blur(0);letter-spacing:.20em;text-indent:.20em;transform:scale(1)}}
+          @keyframes minato-tagline-in{to{opacity:1;transform:translateY(0)}}
+          @keyframes minato-water-breathe{0%{transform:scale(.96);opacity:.35}55%{opacity:1}100%{transform:scale(1.04);opacity:.55}}
+          @media(max-width:600px){.minato-opening__name{font-size:clamp(38px,12vw,61px);letter-spacing:.18em;text-indent:.18em}.minato-opening__tagline{margin-top:18px;font-size:11px;letter-spacing:.18em;text-indent:.18em}}
+          @media(prefers-reduced-motion:reduce){.minato-opening::before,.minato-opening::after,.minato-opening__name,.minato-opening__tagline{animation:none!important}.minato-opening__name,.minato-opening__tagline{opacity:1!important;filter:none!important;transform:none!important}.minato-opening::after{display:none}}
+          </style>
+          '''
+
+              opening = r'''
+          <div class="minato-opening" id="minatoOpening" role="presentation" aria-hidden="true">
+            <div class="minato-opening__inner">
+              <p class="minato-opening__name">Minato HIro</p>
+              <p class="minato-opening__tagline">伝えたい想いを、歌に。</p>
+            </div>
+            <button class="minato-opening__skip" id="minatoOpeningSkip" type="button" aria-label="オープニングをスキップ">SKIP</button>
+          </div>
+          '''
+
+              script = r'''
+          <script id="minato-opening-script">
+          (()=>{
+            const el=document.getElementById('minatoOpening');
+            if(!el)return;
+            const key='minatoHiroOpeningDate';
+            const today=new Date().toLocaleDateString('sv-SE');
+            let seen=false;
+            try{seen=localStorage.getItem(key)===today}catch(e){}
+            const reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            let closed=false;
+            const close=()=>{
+              if(closed)return;closed=true;
+              el.classList.add('is-leaving');
+              document.documentElement.classList.remove('minato-intro-lock');
+              try{localStorage.setItem(key,today)}catch(e){}
+              window.setTimeout(()=>el.remove(),800);
+            };
+            if(seen){el.remove();return}
+            document.documentElement.classList.add('minato-intro-lock');
+            const skip=document.getElementById('minatoOpeningSkip');
+            if(skip)skip.addEventListener('click',close,{once:true});
+            document.addEventListener('keydown',e=>{if(e.key==='Escape')close()},{once:true});
+            window.setTimeout(close,reduce?650:3000);
+          })();
+          </script>
+          '''
+
+              if '</head>' not in html or '<body' not in html or '</body>' not in html:
+                  raise SystemExit('Expected HTML anchors were not found; refusing to patch.')
+
+              html = html.replace('</head>', style + '\n</head>', 1)
+              body_end = html.find('>', html.find('<body')) + 1
+              html = html[:body_end] + '\n' + opening + html[body_end:]
+              html = html.replace('</body>', script + '\n</body>', 1)
+              path.write_text(html, encoding='utf-8')
+              print('Opening installed.')
+
+      - name: Commit patched homepage and remove one-time workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/add-site-opening.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html .github/workflows/add-site-opening.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add cinematic opening to official site"
+            git push
+          fi
