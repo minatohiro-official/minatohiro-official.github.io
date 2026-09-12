@@ -13,7 +13,8 @@
   <main class="top">
     <a class="back" href="../">← OFFICIAL SITE</a>
     <section class="hero"><p class="eyebrow">MINATO HIRO / FAN ROOM</p><h1>FAN<br>ROOM</h1><p>曲の感想、配信で聴きたい歌、聞いてみたいこと。<br>あなたの想いを、ここから届けてください。</p></section>
-    <section class="grid">
+    <div style="max-width:900px;margin:0 auto 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px"><button type="button" data-room="send" class="send">MESSAGE TO HIRO<br>メッセージを送る</button><button type="button" data-room="reply" class="send">HIRO'S REPLY<br>メッセージを見る</button></div>
+    <section class="grid" id="room-content">
       <article class="card"><p class="eyebrow">SEND A MESSAGE</p><h2>Message to Hiro</h2><p>いただいた内容は、湊音ヒロ本人が確認します。返信・紹介はお約束できません。</p><div class="types"><span>曲の感想</span><span>歌唱リクエスト</span><span>質問・応援メッセージ</span></div><form id="message-form"><label for="category">種類</label><select id="category" name="category" required><option value="message">曲の感想・応援メッセージ</option><option value="request">歌唱リクエスト</option><option value="question">質問</option></select><label for="nickname">ニックネーム（任意）</label><input id="nickname" name="nickname" maxlength="30" autocomplete="nickname"><label for="body">メッセージ</label><textarea id="body" name="body" maxlength="1200" required></textarea><label class="consent"><input type="checkbox" name="allowFeature"><span>ニックネームのみであれば、配信・SNS・FAN ROOMで紹介してよい</span></label><input name="website" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true"><button class="send" type="submit">SEND MESSAGE ↗</button><p id="status" class="status" role="status"></p></form><p class="note">個人情報・連絡先・第三者の情報は書かないでください。内容によっては確認・削除を行います。</p></article>
       <aside class="card"><p class="eyebrow">HIRO'S REPLY</p><h2>Reply</h2><p>FAN ROOMに届いたメッセージから、湊音ヒロが選んだものに返信します。</p><div id="replies" class="reply-list"><p>返信は準備中です。</p></div></aside>
     </section>
@@ -21,7 +22,8 @@
   <script>
     const API_BASE='https://fan-room-api.manabit.workers.dev';
     const artist='minato-hiro';
-    const form=document.querySelector('#message-form'),status=document.querySelector('#status'),replies=document.querySelector('#replies');
+    const form=document.querySelector('#message-form'),status=document.querySelector('#status'),replies=document.querySelector('#replies'),cards=document.querySelectorAll('#room-content .card');
+    document.querySelectorAll('[data-room]').forEach(button=>button.addEventListener('click',()=>{cards.forEach((card,i)=>card.hidden=button.dataset.room==='send'?i!==0:i!==1);document.querySelector('#room-content').scrollIntoView({behavior:'smooth',block:'start'})}));
     async function loadReplies(){try{const res=await fetch(`${API_BASE}/v1/artists/${artist}/replies`);if(!res.ok)return;const data=await res.json();if(!data.items.length)return;replies.innerHTML=data.items.map(i=>`<article class="reply"><small>${i.nickname||'匿名'} / ${new Date(i.createdAt).toLocaleDateString('ja-JP')}</small><p><strong>FAN'S MESSAGE</strong><br>${escapeHtml(i.body)}</p><p><strong>HIRO'S REPLY</strong><br>${escapeHtml(i.reply)}</p></article>`).join('')}catch{}}
     function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
     form.addEventListener('submit',async e=>{e.preventDefault();const button=form.querySelector('button');button.disabled=true;status.textContent='送信しています…';const payload=Object.fromEntries(new FormData(form));payload.allowFeature=Boolean(form.allowFeature.checked);try{const res=await fetch(`${API_BASE}/v1/artists/${artist}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(!res.ok)throw new Error(data.error||'送信できませんでした。');form.reset();status.textContent='メッセージを受け取りました。ありがとう。'}catch(err){status.textContent=err.message||'送信できませんでした。時間をおいてもう一度お試しください。'}finally{button.disabled=false}});
