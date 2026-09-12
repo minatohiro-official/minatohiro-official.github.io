@@ -53,8 +53,8 @@ async function createMessage(request, env, slug) {
 async function publicReplies(request, env, slug) {
   const target = await artist(env, slug);
   if (!target) return json({ items: [] }, 404, request);
-  const { results } = await env.DB.prepare('SELECT nickname, allow_feature, artist_reply, updated_at FROM fan_messages WHERE artist_id = ? AND status = \'approved\' AND reply_published = 1 AND artist_reply IS NOT NULL ORDER BY updated_at DESC LIMIT 12').bind(target.id).all();
-  return json({ items: results.map(row => ({ nickname: row.allow_feature ? row.nickname : '匿名', reply: row.artist_reply, createdAt: row.updated_at })) }, 200, request);
+  const { results } = await env.DB.prepare('SELECT category, nickname, body, allow_feature, artist_reply, updated_at FROM fan_messages WHERE artist_id = ? AND status = \'approved\' AND reply_published = 1 AND artist_reply IS NOT NULL ORDER BY updated_at DESC LIMIT 12').bind(target.id).all();
+  return json({ items: results.map(row => ({ category: row.category, nickname: row.allow_feature ? row.nickname : '匿名', body: row.body, reply: row.artist_reply, createdAt: row.updated_at })) }, 200, request);
 }
 
 async function login(request, env) {
