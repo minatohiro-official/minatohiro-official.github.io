@@ -155,6 +155,7 @@ html.minato-intro-lock,html.minato-intro-lock body{overflow:hidden!important}
 (()=>{
   const el=document.getElementById('minatoOpening');
   if(!el)return;
+  if(new URLSearchParams(window.location.search).has('fromFan')){el.remove();return;}
   const reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let closed=false;
   const close=()=>{
