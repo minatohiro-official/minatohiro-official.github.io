@@ -6,9 +6,10 @@ export default {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return new Response(null, { headers: corsHeaders(request) });
     try {
-      if (url.pathname === '/admin') return adminPage();
+      if (url.pathname === '/admin') return adminPage(request, env, url);
       if (url.pathname === '/admin/login' && request.method === 'POST') return login(request, env);
       if (url.pathname === '/admin/logout' && request.method === 'POST') return logout();
+      if (url.pathname.startsWith('/admin/messages/') && request.method === 'POST') return updateMessageForm(request, env, url.pathname.split('/').pop());
       if (url.pathname === '/admin/messages' && request.method === 'GET') return adminMessages(request, env);
       if (url.pathname.startsWith('/admin/messages/') && request.method === 'PATCH') return updateMessage(request, env, url.pathname.split('/').pop());
       const parts = url.pathname.split('/').filter(Boolean);
@@ -57,13 +58,18 @@ async function publicReplies(request, env, slug) {
 }
 
 async function login(request, env) {
-  const { password } = await request.json();
-  if (!env.ADMIN_PASSWORD || !same(String(password || ''), env.ADMIN_PASSWORD)) return json({ error: 'パスワードが違います。' }, 401, request);
+  const type = request.headers.get('Content-Type') || '';
+  const password = type.includes('application/json') ? (await request.json()).password : (await request.formData()).get('password');
+  if (!env.ADMIN_PASSWORD || !same(String(password || ''), env.ADMIN_PASSWORD)) {
+    if (!type.includes('application/json')) return redirect('/admin?error=password');
+    return json({ error: 'パスワードが違います。' }, 401, request);
+  }
   const token = await sessionToken(env);
+  if (!type.includes('application/json')) return redirect('/admin', { 'Set-Cookie': `fan_room_admin=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800` });
   return json({ ok: true, token }, 200, request, { 'Set-Cookie': `fan_room_admin=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=28800` });
 }
 
-function logout() { return new Response(null, { status: 204, headers: { 'Set-Cookie': 'fan_room_admin=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0' } }); }
+function logout() { return redirect('/admin', { 'Set-Cookie': 'fan_room_admin=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0' }); }
 
 async function adminMessages(request, env) {
   if (!await signedIn(request, env)) return json({ error: 'Unauthorized' }, 401, request);
@@ -79,6 +85,16 @@ async function updateMessage(request, env, id) {
   const publish = data.publish && reply && status === 'approved' ? 1 : 0;
   await env.DB.prepare('UPDATE fan_messages SET status = ?, artist_reply = ?, reply_published = ?, updated_at = ? WHERE id = ?').bind(status, reply, publish, new Date().toISOString(), id).run();
   return json({ ok: true }, 200, request);
+}
+
+async function updateMessageForm(request, env, id) {
+  if (!await signedIn(request, env)) return redirect('/admin?error=session');
+  const data = await request.formData();
+  const status = ['pending', 'approved', 'archived'].includes(data.get('status')) ? data.get('status') : 'pending';
+  const reply = String(data.get('reply') || '').trim().slice(0, 1200) || null;
+  const publish = data.get('publish') === 'on' && reply && status === 'approved' ? 1 : 0;
+  await env.DB.prepare('UPDATE fan_messages SET status = ?, artist_reply = ?, reply_published = ?, updated_at = ? WHERE id = ?').bind(status, reply, publish, new Date().toISOString(), id).run();
+  return redirect('/admin?saved=1');
 }
 
 async function limitKey(request, env, artistId) {
@@ -111,9 +127,20 @@ function same(a, b) { if (a.length !== b.length) return false; let diff = 0; for
 function isAllowedOrigin(request) { return request.headers.get('Origin') === ALLOWED_ORIGIN; }
 function corsHeaders(request) { return isAllowedOrigin(request) ? { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Vary': 'Origin' } : {}; }
 function json(data, status, request, extra = {}) { return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...corsHeaders(request), ...extra } }); }
+function redirect(location, headers = {}) { return new Response(null, { status: 303, headers: { Location: location, ...headers } }); }
+function escHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 function adminPageLegacy() { return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FAN ROOM 管理</title><style>body{max-width:900px;margin:40px auto;padding:0 18px;background:#07080d;color:#eee;font-family:system-ui}input,textarea,select,button{box-sizing:border-box;width:100%;margin:6px 0;padding:10px;background:#141827;color:#fff;border:1px solid #ffffff33}button{cursor:pointer;color:#d7b777}.item{margin:18px 0;padding:18px;border:1px solid #ffffff22;white-space:pre-wrap}.hidden{display:none}</style><h1>FAN ROOM 管理</h1><section id="login-panel"><input id="pw" type="password" placeholder="管理パスワード"><button onclick="login()">ログイン</button><p id="err"></p></section><section id="app" class="hidden"><button onclick="logout()">ログアウト</button><div id="list"></div></section><script>const $=s=>document.querySelector(s);async function login(){let r=await fetch('/admin/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:$('#pw').value})});if(!r.ok){$('#err').textContent='パスワードを確認してください';return}loginBox(false);load()}function loginBox(ok){$('#login-panel').classList.toggle('hidden',ok);$('#app').classList.toggle('hidden',!ok)}async function load(){let r=await fetch('/admin/messages');if(!r.ok)return;let d=await r.json();loginBox(true);$('#list').innerHTML=d.items.map(i=>'<article class="item"><small>'+i.display_name+' / '+i.category+' / '+i.created_at+'</small><h3>'+esc(i.nickname)+'</h3><p>'+esc(i.body)+'</p><label>状態</label><select id="s-'+i.id+'"><option value="pending" '+(i.status==='pending'?'selected':'')+'>確認中</option><option value="approved" '+(i.status==='approved'?'selected':'')+'>承認</option><option value="archived" '+(i.status==='archived'?'selected':'')+'>保管</option></select><label>返信</label><textarea id="r-'+i.id+'">'+esc(i.artist_reply||'')+'</textarea><label><input id="p-'+i.id+'" type="checkbox" '+(i.reply_published?'checked':'')+'>公開する</label><button onclick="save(\''+i.id+'\')">保存</button></article>').join('')}async function save(id){await fetch('/admin/messages/'+id,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:$('#s-'+id).value,reply:$('#r-'+id).value,publish:$('#p-'+id).checked})});load()}async function logout(){await fetch('/admin/logout',{method:'POST'});location.reload()}function esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}load()</script>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }); }
 
-function adminPage() {
-  return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FAN ROOM 管理</title><style>body{max-width:900px;margin:40px auto;padding:0 18px;background:#07080d;color:#eee;font-family:system-ui}input,textarea,select,button{box-sizing:border-box;width:100%;margin:6px 0;padding:10px;background:#141827;color:#fff;border:1px solid #ffffff33}button{cursor:pointer;color:#d7b777}.item{margin:18px 0;padding:18px;border:1px solid #ffffff22;white-space:pre-wrap}.hidden{display:none}#err{color:#f0aaa4}</style><h1>FAN ROOM 管理</h1><section id="login-panel"><input id="pw" type="password" placeholder="管理パスワード"><button id="login-button" onclick="login()">ログイン</button><p id="err" role="alert"></p></section><section id="app" class="hidden"><button onclick="logout()">ログアウト</button><div id="list"></div></section><script>const $=s=>document.querySelector(s),TOKEN='fan_room_admin_token';const auth=()=>{const t=sessionStorage.getItem(TOKEN);return t?{Authorization:'Bearer '+t}:{}};function loginBox(ok){$('#login-panel').classList.toggle('hidden',ok);$('#app').classList.toggle('hidden',!ok)}async function response(url,options){const r=await fetch(url,options);let d={};try{d=await r.json()}catch(_){}return{r,d}}async function login(){const err=$('#err'),button=$('#login-button');err.textContent='';button.disabled=true;try{const x=await response('/admin/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:$('#pw').value})});if(!x.r.ok||!x.d.token){err.textContent=x.r.status===401?'パスワードを確認してください。':'ログイン処理に失敗しました（HTTP '+x.r.status+'）';return}sessionStorage.setItem(TOKEN,x.d.token);await load(true)}catch(_){err.textContent='通信エラーです。ページを再読み込みして、もう一度お試しください。'}finally{button.disabled=false}}async function load(afterLogin=false){try{const x=await response('/admin/messages',{headers:auth()});if(!x.r.ok){loginBox(false);if(afterLogin)$('#err').textContent='ログイン後のデータ取得に失敗しました（HTTP '+x.r.status+'）';return}loginBox(true);$('#list').innerHTML=x.d.items.map(i=>'<article class="item"><small>'+i.display_name+' / '+i.category+' / '+i.created_at+'</small><h3>'+esc(i.nickname)+'</h3><p>'+esc(i.body)+'</p><label>状態</label><select id="s-'+i.id+'"><option value="pending" '+(i.status==='pending'?'selected':'')+'>確認中</option><option value="approved" '+(i.status==='approved'?'selected':'')+'>承認</option><option value="archived" '+(i.status==='archived'?'selected':'')+'>保管</option></select><label>返信</label><textarea id="r-'+i.id+'">'+esc(i.artist_reply||'')+'</textarea><label><input id="p-'+i.id+'" type="checkbox" '+(i.reply_published?'checked':'')+'>公開する</label><button onclick="save(\''+i.id+'\')">保存</button></article>').join('')}catch(_){loginBox(false);if(afterLogin)$('#err').textContent='通信エラーです。ページを再読み込みして、もう一度お試しください。'}}async function save(id){await fetch('/admin/messages/'+id,{method:'PATCH',headers:{'content-type':'application/json',...auth()},body:JSON.stringify({status:$('#s-'+id).value,reply:$('#r-'+id).value,publish:$('#p-'+id).checked})});load()}async function logout(){sessionStorage.removeItem(TOKEN);await fetch('/admin/logout',{method:'POST'});location.reload()}function esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}load()</script>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+async function adminPage(request, env, url) {
+  const shell = (content) => new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FAN ROOM 管理</title><style>body{max-width:900px;margin:40px auto;padding:0 18px;background:#07080d;color:#eee;font-family:system-ui}input,textarea,select,button{box-sizing:border-box;width:100%;margin:6px 0;padding:10px;background:#141827;color:#fff;border:1px solid #ffffff33}button{cursor:pointer;color:#d7b777}.item{margin:18px 0;padding:18px;border:1px solid #ffffff22;white-space:pre-wrap}.notice{color:#d7b777}.error{color:#f0aaa4}</style><h1>FAN ROOM 管理</h1>${content}`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  if (!await signedIn(request, env)) {
+    const error = url.searchParams.get('error') === 'password' ? '<p class="error">パスワードを確認してください。</p>' : url.searchParams.get('error') === 'session' ? '<p class="error">セッションが切れました。もう一度ログインしてください。</p>' : '';
+    return shell(`<form method="post" action="/admin/login"><input name="password" type="password" placeholder="管理パスワード" required autofocus><button type="submit">ログイン</button>${error}</form>`);
+  }
+  const { results } = await env.DB.prepare('SELECT m.id, a.display_name, m.category, m.nickname, m.body, m.status, m.artist_reply, m.reply_published, m.created_at FROM fan_messages m JOIN artists a ON a.id = m.artist_id ORDER BY m.created_at DESC LIMIT 100').all();
+  const labels = { message: 'メッセージ', request: '歌唱リクエスト', question: '質問' };
+  const items = results.map(i => `<article class="item"><small>${escHtml(i.display_name)} / ${escHtml(labels[i.category] || i.category)} / ${escHtml(i.created_at)}</small><h3>${escHtml(i.nickname)}</h3><p>${escHtml(i.body)}</p><form method="post" action="/admin/messages/${encodeURIComponent(i.id)}"><label>状態</label><select name="status"><option value="pending" ${i.status === 'pending' ? 'selected' : ''}>確認中</option><option value="approved" ${i.status === 'approved' ? 'selected' : ''}>承認</option><option value="archived" ${i.status === 'archived' ? 'selected' : ''}>保管</option></select><label>返信</label><textarea name="reply">${escHtml(i.artist_reply || '')}</textarea><label><input name="publish" type="checkbox" ${i.reply_published ? 'checked' : ''}>公開する</label><button type="submit">保存</button></form></article>`).join('') || '<p>まだメッセージはありません。</p>';
+  const saved = url.searchParams.get('saved') === '1' ? '<p class="notice">保存しました。</p>' : '';
+  return shell(`<form method="post" action="/admin/logout"><button type="submit">ログアウト</button></form>${saved}<div>${items}</div>`);
 }
