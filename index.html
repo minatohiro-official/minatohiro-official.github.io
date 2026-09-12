@@ -76,6 +76,9 @@ html.minato-intro-lock,html.minato-intro-lock body{overflow:hidden!important}
   .news-mv-link{border-bottom:1px solid #c9a56388;color:var(--paper)}
   .news-mv-link:hover{color:var(--gold)}
 </style>
+<style>
+  .actions{flex-wrap:wrap;gap:12px 18px}.actions .fan-room-cta{flex-basis:100%;border:1px solid #c9a56399;color:var(--gold);text-align:center;line-height:1.8}.actions .fan-room-cta small{display:block;margin-top:3px;color:var(--paper);font-size:8px;letter-spacing:.14em}
+</style>
 </head>
 <body data-view="home">
 
@@ -168,5 +171,16 @@ html.minato-intro-lock,html.minato-intro-lock body{overflow:hidden!important}
 })();
 </script>
 
+<script>
+  (function(){
+    var actions=document.querySelector('.hero .actions');
+    if(!actions)return;
+    var link=document.createElement('a');
+    link.className='fan-room-cta';
+    link.href='fan/';
+    link.innerHTML='FAN ROOM ↗<small>メッセージ・質問・歌唱リクエストを届ける</small>';
+    actions.appendChild(link);
+  }());
+</script>
 </body>
 </html>
