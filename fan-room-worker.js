@@ -7,6 +7,8 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers: corsHeaders(request) });
     try {
       if (url.pathname === '/admin') return adminPage(request, env, url);
+      if (url.pathname === '/admin/art') return adminArtPage(request, env, url);
+      if (url.pathname.startsWith('/admin/art/') && request.method === 'POST') return updateArtForm(request, env, url.pathname.split('/').pop());
       if (url.pathname === '/admin/login' && request.method === 'POST') return login(request, env);
       if (url.pathname === '/admin/logout' && request.method === 'POST') return logout();
       if (url.pathname.startsWith('/admin/messages/') && request.method === 'POST') return updateMessageForm(request, env, url.pathname.split('/').pop());
@@ -16,6 +18,8 @@ export default {
       const parts = url.pathname.split('/').filter(Boolean);
       if (parts[0] === 'v1' && parts[1] === 'artists' && parts[3] === 'replies' && request.method === 'GET') return publicReplies(request, env, parts[2]);
       if (parts[0] === 'v1' && parts[1] === 'artists' && parts[3] === 'messages' && request.method === 'POST') return createMessage(request, env, parts[2]);
+      if (parts[0] === 'v1' && parts[1] === 'artists' && parts[3] === 'art' && request.method === 'GET') return publicArt(request, env, parts[2]);
+      if (parts[0] === 'v1' && parts[1] === 'artists' && parts[3] === 'art' && request.method === 'POST') return createArt(request, env, parts[2]);
       return json({ error: 'Not found' }, 404, request);
     } catch (error) {
       console.error(error);
@@ -26,6 +30,24 @@ export default {
 
 async function artist(env, slug) {
   return env.DB.prepare('SELECT id, slug, display_name FROM artists WHERE slug = ?').bind(slug).first();
+}
+
+async function createArt(request, env, slug) {
+  if (!isAllowedOrigin(request)) return json({ error: '許可されていない送信元です。' }, 403, request);
+  const data = await request.json(), target = await artist(env, slug);
+  const postUrl = String(data.postUrl || '').trim();
+  const nickname = String(data.nickname || '匿名').trim().slice(0, 30) || '匿名';
+  if (!target || !/^https:\/\/(x\.com|twitter\.com)\/.+\/status\/\d+/i.test(postUrl)) return json({ error: '公開中のX投稿URLを入力してください。' }, 400, request);
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS fan_art (id TEXT PRIMARY KEY, artist_id TEXT NOT NULL, nickname TEXT NOT NULL, post_url TEXT NOT NULL, status TEXT NOT NULL DEFAULT \'pending\', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)').run();
+  const now = new Date().toISOString();
+  await env.DB.prepare('INSERT INTO fan_art (id, artist_id, nickname, post_url, status, created_at, updated_at) VALUES (?, ?, ?, ?, \'pending\', ?, ?)').bind(crypto.randomUUID(), target.id, nickname, postUrl, now, now).run();
+  return json({ ok: true }, 201, request);
+}
+async function publicArt(request, env, slug) {
+  const target = await artist(env, slug); if (!target) return json({ items: [] }, 404, request);
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS fan_art (id TEXT PRIMARY KEY, artist_id TEXT NOT NULL, nickname TEXT NOT NULL, post_url TEXT NOT NULL, status TEXT NOT NULL DEFAULT \'pending\', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)').run();
+  const { results } = await env.DB.prepare("SELECT nickname, post_url, updated_at FROM fan_art WHERE artist_id = ? AND status = 'approved' ORDER BY updated_at DESC LIMIT 48").bind(target.id).all();
+  return json({ items: results.map(x => ({ nickname:x.nickname, postUrl:x.post_url, createdAt:x.updated_at })) }, 200, request);
 }
 
 async function createMessage(request, env, slug) {
@@ -138,6 +160,15 @@ function escHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({
 
 function adminPageLegacy() { return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FAN ROOM 管理</title><style>body{max-width:900px;margin:40px auto;padding:0 18px;background:#07080d;color:#eee;font-family:system-ui}input,textarea,select,button{box-sizing:border-box;width:100%;margin:6px 0;padding:10px;background:#141827;color:#fff;border:1px solid #ffffff33}button{cursor:pointer;color:#d7b777}.item{margin:18px 0;padding:18px;border:1px solid #ffffff22;white-space:pre-wrap}.hidden{display:none}</style><h1>FAN ROOM 管理</h1><section id="login-panel"><input id="pw" type="password" placeholder="管理パスワード"><button onclick="login()">ログイン</button><p id="err"></p></section><section id="app" class="hidden"><button onclick="logout()">ログアウト</button><div id="list"></div></section><script>const $=s=>document.querySelector(s);async function login(){let r=await fetch('/admin/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:$('#pw').value})});if(!r.ok){$('#err').textContent='パスワードを確認してください';return}loginBox(false);load()}function loginBox(ok){$('#login-panel').classList.toggle('hidden',ok);$('#app').classList.toggle('hidden',!ok)}async function load(){let r=await fetch('/admin/messages');if(!r.ok)return;let d=await r.json();loginBox(true);$('#list').innerHTML=d.items.map(i=>'<article class="item"><small>'+i.display_name+' / '+i.category+' / '+i.created_at+'</small><h3>'+esc(i.nickname)+'</h3><p>'+esc(i.body)+'</p><label>状態</label><select id="s-'+i.id+'"><option value="pending" '+(i.status==='pending'?'selected':'')+'>確認中</option><option value="approved" '+(i.status==='approved'?'selected':'')+'>承認</option><option value="archived" '+(i.status==='archived'?'selected':'')+'>保管</option></select><label>返信</label><textarea id="r-'+i.id+'">'+esc(i.artist_reply||'')+'</textarea><label><input id="p-'+i.id+'" type="checkbox" '+(i.reply_published?'checked':'')+'>公開する</label><button onclick="save(\''+i.id+'\')">保存</button></article>').join('')}async function save(id){await fetch('/admin/messages/'+id,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:$('#s-'+id).value,reply:$('#r-'+id).value,publish:$('#p-'+id).checked})});load()}async function logout(){await fetch('/admin/logout',{method:'POST'});location.reload()}function esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}load()</script>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }); }
 
+async function updateArtForm(request, env, id) { if (!await signedIn(request, env)) return redirect('/admin?error=session'); const d=await request.formData(); const status=['pending','approved','archived'].includes(d.get('status'))?d.get('status'):'pending'; await env.DB.prepare('UPDATE fan_art SET status=?, updated_at=? WHERE id=?').bind(status,new Date().toISOString(),id).run(); return redirect('/admin/art?saved=1'); }
+async function adminArtPage(request, env, url) {
+  if(!await signedIn(request,env)) return redirect('/admin');
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS fan_art (id TEXT PRIMARY KEY, artist_id TEXT NOT NULL, nickname TEXT NOT NULL, post_url TEXT NOT NULL, status TEXT NOT NULL DEFAULT \'pending\', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)').run();
+  const {results}=await env.DB.prepare('SELECT id,nickname,post_url,status,created_at FROM fan_art ORDER BY created_at DESC LIMIT 100').all();
+  const items=results.map(x=>`<article><small>${escHtml(x.created_at)}</small><h3>${escHtml(x.nickname)}</h3><a href="${escHtml(x.post_url)}" target="_blank" rel="noreferrer">X投稿を開く ↗</a><form method="post" action="/admin/art/${encodeURIComponent(x.id)}"><select name="status"><option value="pending" ${x.status==='pending'?'selected':''}>確認中</option><option value="approved" ${x.status==='approved'?'selected':''}>掲載する</option><option value="archived" ${x.status==='archived'?'selected':''}>非公開</option></select><button>保存</button></form></article>`).join('')||'<p>まだ投稿はありません。</p>';
+  return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FAN ART 管理</title><style>body{max-width:760px;margin:24px auto;padding:0 16px;background:#07080d;color:#eee;font-family:system-ui}a{color:#d7b777}select,button{box-sizing:border-box;width:100%;margin:8px 0;padding:14px;background:#141827;color:#fff;border:1px solid #ffffff33;font-size:16px}button{color:#d7b777}article{padding:18px;margin:16px 0;border:1px solid #ffffff22;word-break:break-all}</style><h1>FAN ART 管理</h1><p><a href="/admin">← メッセージ管理</a></p>${url.searchParams.get('saved')?'<p>保存しました。</p>':''}${items}`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+}
+
 async function adminPage(request, env, url) {
   const shell = (content) => new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FAN ROOM 管理</title><style>body{max-width:760px;margin:24px auto;padding:0 16px;background:#07080d;color:#eee;font-family:system-ui}input,textarea,select,button{box-sizing:border-box;width:100%;margin:8px 0;padding:14px;background:#141827;color:#fff;border:1px solid #ffffff33;font-size:16px}button{cursor:pointer;color:#d7b777;font-weight:700}.item{margin:16px 0;padding:18px;border:1px solid #ffffff22;white-space:pre-wrap}.notice{color:#d7b777}.error{color:#f0aaa4}.delete{color:#f0aaa4;border-color:#f0aaa455}@media(min-width:760px){body{margin-top:40px}}</style><h1>FAN ROOM 管理</h1>${content}`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   if (!await signedIn(request, env)) {
@@ -148,5 +179,5 @@ async function adminPage(request, env, url) {
   const labels = { message: 'メッセージ', request: '歌唱リクエスト', question: '質問' };
   const items = results.map(i => `<article class="item"><small>${escHtml(i.display_name)} / ${escHtml(labels[i.category] || i.category)} / ${escHtml(i.created_at)}</small><h3>${escHtml(i.nickname)}</h3><p>${escHtml(i.body)}</p><form method="post" action="/admin/messages/${encodeURIComponent(i.id)}"><label>状態</label><select name="status"><option value="pending" ${i.status === 'pending' ? 'selected' : ''}>確認中</option><option value="approved" ${i.status === 'approved' ? 'selected' : ''}>承認・公開候補</option><option value="archived" ${i.status === 'archived' ? 'selected' : ''}>保管</option></select><label>返信</label><textarea name="reply" placeholder="ここに返信を入力">${escHtml(i.artist_reply || '')}</textarea><label><input name="publish" type="checkbox" ${i.reply_published ? 'checked' : ''}> この返信を公開する</label><button type="submit">返信を保存</button></form><button class="delete" onclick="if(confirm('このメッセージを完全に削除しますか？'))fetch('/admin/messages/${encodeURIComponent(i.id)}',{method:'DELETE'}).then(()=>location.href='/admin')">完全に削除</button></article>`).join('') || '<p>まだメッセージはありません。</p>';
   const saved = url.searchParams.get('saved') === '1' ? '<p class="notice">保存しました。</p>' : '';
-  return shell(`<form method="post" action="/admin/logout"><button type="submit">ログアウト</button></form>${saved}<div>${items}</div>`);
+  return shell(`<form method="post" action="/admin/logout"><button type="submit">ログアウト</button></form><p><a href="/admin/art">FAN ART 管理 →</a></p>${saved}<div>${items}</div>`);
 }
